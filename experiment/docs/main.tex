@@ -1,0 +1,38 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{amssymb}
+
+\title{Fib}
+\author{Daniel Greenfield}
+\date{July 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{verbatim}
+main = {
+    label: "main",
+    ins: 
+    block: Block{
+        vec![
+            Stmt::Let{
+                lable = "x",
+                    init: Expr::Call{
+                        ins: vec![Expr::IntLit(4)]
+                        label = "fib"
+                    }
+                }
+            }
+        ]        
+    }
+
+}
+
+fib = {
+
+}
+\end{verbatim}
+
+\end{document}
+
