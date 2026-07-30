@@ -42,12 +42,15 @@ pub enum Stmnt {
     },
     If {
         condition: Expr,
-        block: Block,
+        if_block: Block,
     },
     IfElse {
         condition: Expr,
         if_block: Block,
         else_block: Block,
+    },
+    VoidFunction {
+        call: Expr,
     },
 }
 
@@ -336,6 +339,32 @@ impl<'l> Parser<'l> {
             }
         }
     }
+
+    fn parse_tuple(&mut self, terminator: TokenKind) -> Result<Vec<Expr>, ParseError> {
+        let mut exprs = Vec::default();
+        loop {
+            if self
+                .some_next_token()?
+                .kind
+                == terminator
+            {
+                break;
+            }
+
+            exprs.push(self.parse_expr()?);
+            if self
+                .some_next_token()?
+                .kind
+                == terminator
+            {
+                self.consume()?;
+                break;
+            }
+
+            self.expect_token(TokenKind::Comma)?;
+        }
+        Ok(exprs)
+    }
     //parse_keyword always assume indicating keyword has already been confirmend and consumed
     fn parse_let(&mut self) -> Result<Stmnt, ParseError> {
         let ident = self.expect_ident()?;
@@ -345,40 +374,63 @@ impl<'l> Parser<'l> {
         Ok(Stmnt::Let { ident, _type, init })
     }
     fn parse_return(&mut self) -> Result<Stmnt, ParseError> {
-        let mut exprs = Vec::default();
-        loop {
-            if self
-                .some_next_token()?
-                .kind
-                == TokenKind::Semi
-            {
-                break;
-            }
-
-            exprs.push(self.parse_expr()?);
-            if self
-                .some_next_token()?
-                .kind
-                == TokenKind::Semi
-            {
-                self.consume()?;
-                break;
-            }
-
-            self.expect_token(TokenKind::Comma)?;
-        }
+        let exprs = self.parse_tuple(TokenKind::Semi)?;
         Ok(Stmnt::Return(exprs))
     }
     fn parse_while(&mut self) -> Result<Stmnt, ParseError> {
-        todo!()
+        let condition = self.parse_expr()?;
+        let block = self.parse_block()?;
+        Ok(Stmnt::While { condition, block })
     }
     fn parse_if(&mut self) -> Result<Stmnt, ParseError> {
-        todo!()
+        let condition = self.parse_expr()?;
+        let if_block = self.parse_block()?;
+        if self
+            .some_peek_token()?
+            .kind
+            == TokenKind::Keyword(Keyword::Else)
+        {
+            self.consume()?;
+            let else_block = self.parse_block()?;
+            Ok(Stmnt::IfElse {
+                condition,
+                if_block,
+                else_block,
+            })
+        } else {
+            Ok(Stmnt::If {
+                condition,
+                if_block,
+            })
+        }
     }
     fn parse_ident(&mut self, ident: String) -> Result<Stmnt, ParseError> {
-        todo!()
+        let token = self.some_next_token()?;
+        match token.kind {
+            TokenKind::LParen => {
+                todo!()
+            }
+            TokenKind::Eq => {
+                let init = self.parse_expr()?;
+                Ok(Stmnt::Assign { ident, init })
+            }
+            _ => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                span: Some(token.span),
+            }),
+        }
     }
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        todo!()
+        let mut buf: Option<Token> = None;
+        match self
+            .some_next_token()?
+            .kind
+        {
+            TokenKind::LParen => {
+                let expr = self.parse_expr()?;
+                self.expect_token(TokenKind::RParen)?;
+            }
+            _ => todo!(),
+        }
+        Ok(Expr::Lit(GeneralType::Int(4)))
     }
-}

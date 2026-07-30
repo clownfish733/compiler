@@ -50,6 +50,11 @@ pub enum TokenKind {
     RetType,
     Comma,
 }
+impl TokenKind {
+    pub fn is_binop(&self) -> bool {
+        return self == TokenKind::Add || self == TokenKind::Sub || self == TokenKind::Mul;
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Keyword {
