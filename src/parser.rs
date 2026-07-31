@@ -10,17 +10,14 @@ pub struct Function {
     block: Block,
 }
 
-pub struct FunctionIn {
+pub struct FunctionParam {
     ident: String,
     _type: Type,
 }
 
-pub struct FunctionOut {
-    _type: Type,
-}
 pub struct FunctionApi {
-    ins: Vec<FunctionIn>,
-    outs: Vec<FunctionOut>,
+    params: Option<Vec<FunctionParam>>,
+    _type: Option<Type>,
 }
 
 pub struct Block(Vec<Stmnt>);
@@ -35,7 +32,7 @@ pub enum Stmnt {
         ident: String,
         init: Expr,
     },
-    Return(Vec<Expr>),
+    Return(Option<Expr>),
     While {
         condition: Expr,
         block: Block,
@@ -50,7 +47,8 @@ pub enum Stmnt {
         else_block: Block,
     },
     VoidFunction {
-        call: Expr,
+        ident: String,
+        args: Option<Vec<Expr>>,
     },
 }
 
@@ -68,16 +66,35 @@ pub enum Expr {
     Lit(GeneralType),
     Call {
         ident: String,
-        args: Vec<Expr>,
+        args: Option<Vec<Expr>>,
     },
 }
 
+impl Expr {
+    fn insert_left(self, lexp: Expr, op: BinOp) -> Expr {
+        Expr::Binary {
+            lexp: Box::new(lexp),
+            rexp: Box::new(self),
+            op,
+        }
+    }
+}
+
 pub enum GeneralType {
-    Int(u64),
-    Float(f64),
+    Int(u32),
+    Float(f32),
     Bool(bool),
 }
 
+#[derive(PartialEq, Debug)]
+pub enum Op {
+    BinOp(BinOp),
+    CaoBinOp(BinOp),
+    UnOp(UnOp),
+    None,
+}
+
+#[derive(PartialEq, Debug)]
 pub enum BinOp {
     Add,
     Sub,
@@ -97,12 +114,44 @@ pub enum BinOp {
     LogAnd,
 }
 
+#[derive(PartialEq, Debug)]
 pub enum UnOp {
-    Not,
     Inc,
     Dec,
 }
 
+impl Op {
+    pub fn from_kind(kind: &TokenKind) -> Self {
+        // ignoring not bit operator for now will fix later
+        match kind {
+            TokenKind::Add => Op::BinOp(BinOp::Add),
+            TokenKind::Sub => Op::BinOp(BinOp::Sub),
+            TokenKind::Mul => Op::BinOp(BinOp::Mul),
+            TokenKind::TrueDiv => Op::BinOp(BinOp::TrueDiv),
+            TokenKind::FloorDiv => Op::BinOp(BinOp::FloorDiv),
+            TokenKind::Mod => Op::BinOp(BinOp::Mod),
+            TokenKind::EqEq => Op::BinOp(BinOp::EqEq),
+            TokenKind::Ne => Op::BinOp(BinOp::Ne),
+            TokenKind::Lt => Op::BinOp(BinOp::Lt),
+            TokenKind::Gt => Op::BinOp(BinOp::Gt),
+            TokenKind::Le => Op::BinOp(BinOp::Le),
+            TokenKind::Ge => Op::BinOp(BinOp::Ge),
+            TokenKind::BitOr => Op::BinOp(BinOp::BitOr),
+            TokenKind::BitAnd => Op::BinOp(BinOp::BitAnd),
+            TokenKind::LogOr => Op::BinOp(BinOp::LogOr),
+            TokenKind::LogAnd => Op::BinOp(BinOp::LogAnd),
+            TokenKind::Inc => Op::UnOp(UnOp::Inc),
+            TokenKind::Dec => Op::UnOp(UnOp::Dec),
+            TokenKind::AddEq => Op::CaoBinOp(BinOp::Add),
+            TokenKind::SubEq => Op::CaoBinOp(BinOp::Sub),
+            TokenKind::MulEq => Op::CaoBinOp(BinOp::Mul),
+            TokenKind::TrueDivEq => Op::CaoBinOp(BinOp::TrueDiv),
+            TokenKind::FloorDivEq => Op::CaoBinOp(BinOp::FloorDiv),
+            TokenKind::ModEq => Op::CaoBinOp(BinOp::Mod),
+            _ => Op::None,
+        }
+    }
+}
 #[derive(Default)]
 pub struct FunctionMap(HashMap<String, Function>);
 
@@ -111,12 +160,21 @@ pub struct Parser<'l> {
     functions: FunctionMap,
 }
 
+#[derive(Debug)]
 pub struct ParseError {
     kind: ParseErrorKind,
     span: Option<Span>,
 }
 
-#[derive(PartialEq)]
+impl ParseError {
+    pub fn highlight_error(&self, contents: &str) {
+        if let Some(span) = &self.span {
+            println!("error: {}", &contents[span.start - 4..span.end + 4])
+        }
+    }
+}
+
+#[derive(PartialEq, Debug)]
 pub enum ParseErrorKind {
     UnexpectedChar(char),
     UnterminatedString,
@@ -146,8 +204,13 @@ impl<'l> Parser<'l> {
             tokens: tokens.peekable(),
             functions: FunctionMap::default(),
         };
-        while parser.parse_function()? {}
-        Ok(parser.functions)
+        loop {
+            match parser.parse_function() {
+                Err(e) if e.kind == ParseErrorKind::UnexpectedEOF => return Ok(parser.functions),
+                Err(e) => return Err(e),
+                _ => continue,
+            }
+        }
     }
 
     fn next_token(&mut self) -> Option<Result<Token, LexError>> {
@@ -189,36 +252,27 @@ impl<'l> Parser<'l> {
     }
     //returns Ok(false) if valid EOF
     fn parse_function(&mut self) -> Result<bool, ParseError> {
-        let token = match self.some_next_token() {
-            Ok(t) => t,
-            Err(e) => {
-                if e.kind == ParseErrorKind::UnexpectedEOF {
-                    return Ok(false);
-                } else {
-                    return Err(e);
-                }
-            }
-        };
-        match token.kind {
-            TokenKind::Keyword(Keyword::Function) => {}
-            _ => {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken,
-                    span: Some(token.span),
-                });
-            }
-        }
+        self.expect_token(TokenKind::Keyword(Keyword::Function))?;
         let ident = self.expect_ident()?;
         let params = self.parse_params()?;
-        let returns = self.parse_return_type()?;
+
+        let _type = {
+            if self
+                .some_peek_token()?
+                .kind
+                == TokenKind::RetType
+            {
+                self.consume()?;
+                Some(self.expect_type()?)
+            } else {
+                None
+            }
+        };
         let block = self.parse_block()?;
 
         let function = Function {
             ident: ident.clone(),
-            api: FunctionApi {
-                ins: params,
-                outs: returns,
-            },
+            api: FunctionApi { params, _type },
             block,
         };
         self.functions
@@ -261,65 +315,36 @@ impl<'l> Parser<'l> {
         }
     }
 
-    fn parse_params(&mut self) -> Result<Vec<FunctionIn>, ParseError> {
+    fn parse_params(&mut self) -> Result<Option<Vec<FunctionParam>>, ParseError> {
         self.expect_token(TokenKind::LParen)?;
-        let mut params = Vec::default();
-        loop {
-            let token = self.some_next_token()?;
-            match token.kind {
-                TokenKind::RParen => return Ok(params),
-                TokenKind::Ident(ident) => {
-                    let _type = self.expect_type()?;
-                    params.push(FunctionIn { ident, _type });
-                    let token = self.some_next_token()?;
-                    match token.kind {
-                        TokenKind::Comma => continue,
-                        TokenKind::RParen => return Ok(params),
-                        _ => {
-                            return Err(ParseError {
-                                kind: ParseErrorKind::UnexpectedToken,
-                                span: Some(token.span),
-                            });
-                        }
-                    }
-                }
-                _ => {
-                    return Err(ParseError {
-                        kind: ParseErrorKind::UnexpectedToken,
-                        span: Some(token.span),
-                    });
-                }
-            }
-        }
-    }
-
-    fn parse_return_type(&mut self) -> Result<Vec<FunctionOut>, ParseError> {
-        let mut outs = Vec::default();
         if self
             .some_peek_token()?
             .kind
-            == TokenKind::LBrace
+            == TokenKind::RParen
         {
-            return Ok(outs);
+            self.consume()?;
+            return Ok(None);
         }
-        self.expect_token(TokenKind::RetType)?;
+        let mut params = Vec::default();
         loop {
-            outs.push(FunctionOut {
-                _type: self.expect_type()?,
-            });
+            let ident = self.expect_ident()?;
+            let _type = self.expect_type()?;
+            params.push(FunctionParam { ident, _type });
             if self
                 .some_peek_token()?
                 .kind
-                == TokenKind::LBrace
+                == TokenKind::RParen
             {
-                return Ok(outs);
+                self.consume()?;
+                break;
             }
             self.expect_token(TokenKind::Comma)?;
         }
-    }
 
+        Ok(Some(params))
+    }
     fn parse_block(&mut self) -> Result<Block, ParseError> {
-        self.expect_token(TokenKind::RParen)?;
+        self.expect_token(TokenKind::LBrace)?;
         let mut stmnts = Vec::new();
         loop {
             let token = self.some_next_token()?;
@@ -329,7 +354,7 @@ impl<'l> Parser<'l> {
                 TokenKind::Keyword(Keyword::While) => stmnts.push(self.parse_while()?),
                 TokenKind::Keyword(Keyword::If) => stmnts.push(self.parse_if()?),
                 TokenKind::Ident(ident) => stmnts.push(self.parse_ident(ident)?),
-                TokenKind::LBrace => return Ok(Block(stmnts)),
+                TokenKind::RBrace => return Ok(Block(stmnts)),
                 _ => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken,
@@ -340,32 +365,41 @@ impl<'l> Parser<'l> {
         }
     }
 
-    fn parse_tuple(&mut self, terminator: TokenKind) -> Result<Vec<Expr>, ParseError> {
+    fn parse_tuple(&mut self, terminator: TokenKind) -> Result<Option<Vec<Expr>>, ParseError> {
         let mut exprs = Vec::default();
+        dbg!(self.peek_token());
         loop {
             if self
-                .some_next_token()?
-                .kind
-                == terminator
-            {
-                break;
-            }
-
-            exprs.push(self.parse_expr()?);
-            if self
-                .some_next_token()?
+                .some_peek_token()?
                 .kind
                 == terminator
             {
                 self.consume()?;
                 break;
             }
-
+            println!("-----------------pre parse-----------------");
+            exprs.push(self.parse_expr()?);
+            if self
+                .some_peek_token()?
+                .kind
+                == terminator
+            {
+                println!("---------proper termination");
+                self.consume()?;
+                break;
+            }
+            dbg!(self.peek_token());
+            println!("--------------improper termination");
             self.expect_token(TokenKind::Comma)?;
         }
-        Ok(exprs)
+
+        if exprs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(exprs))
+        }
     }
-    //parse_keyword always assume indicating keyword has already been confirmend and consumed
+    //parse_keyword always assume indicating keyword has already been confirmed
     fn parse_let(&mut self) -> Result<Stmnt, ParseError> {
         let ident = self.expect_ident()?;
         let _type = self.expect_type()?;
@@ -374,8 +408,19 @@ impl<'l> Parser<'l> {
         Ok(Stmnt::Let { ident, _type, init })
     }
     fn parse_return(&mut self) -> Result<Stmnt, ParseError> {
-        let exprs = self.parse_tuple(TokenKind::Semi)?;
-        Ok(Stmnt::Return(exprs))
+        println!("--------------return------------");
+        dbg!(self.peek_token());
+        if self
+            .some_peek_token()?
+            .kind
+            == TokenKind::Semi
+        {
+            self.consume()?;
+            return Ok(Stmnt::Return(None));
+        }
+        let expr = self.parse_expr()?;
+        self.expect_token(TokenKind::Semi)?;
+        Ok(Stmnt::Return(Some(expr)))
     }
     fn parse_while(&mut self) -> Result<Stmnt, ParseError> {
         let condition = self.parse_expr()?;
@@ -384,6 +429,7 @@ impl<'l> Parser<'l> {
     }
     fn parse_if(&mut self) -> Result<Stmnt, ParseError> {
         let condition = self.parse_expr()?;
+
         let if_block = self.parse_block()?;
         if self
             .some_peek_token()?
@@ -405,32 +451,162 @@ impl<'l> Parser<'l> {
         }
     }
     fn parse_ident(&mut self, ident: String) -> Result<Stmnt, ParseError> {
-        let token = self.some_next_token()?;
-        match token.kind {
+        match self
+            .some_peek_token()?
+            .kind
+        {
             TokenKind::LParen => {
-                todo!()
+                self.consume()?;
+                let args = self.parse_tuple(TokenKind::RParen)?;
+                Ok(Stmnt::VoidFunction { ident, args })
             }
             TokenKind::Eq => {
                 let init = self.parse_expr()?;
                 Ok(Stmnt::Assign { ident, init })
             }
-            _ => Err(ParseError {
+            _ => self.parse_cao(ident),
+        }
+    }
+    fn parse_cao(&mut self, ident: String) -> Result<Stmnt, ParseError> {
+        let token = self.some_next_token()?;
+        if let Op::CaoBinOp(op) = Op::from_kind(&token.kind) {
+            Ok(Stmnt::Assign {
+                ident: ident.clone(),
+                init: self
+                    .parse_expr()?
+                    .insert_left(Expr::Ident(ident), op),
+            })
+        } else {
+            Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken,
                 span: Some(token.span),
-            }),
+            })
         }
     }
+
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut buf: Option<Token> = None;
-        match self
-            .some_next_token()?
-            .kind
-        {
-            TokenKind::LParen => {
-                let expr = self.parse_expr()?;
-                self.expect_token(TokenKind::RParen)?;
+        dbg!(self.peek_token());
+        let token = self.some_next_token()?;
+        let lexp = match token.kind {
+            TokenKind::Int(n) => Expr::Lit(GeneralType::Int(n)),
+            TokenKind::Float(n) => Expr::Lit(GeneralType::Float(n)),
+            TokenKind::Bool(n) => Expr::Lit(GeneralType::Bool(n)),
+            TokenKind::Ident(ident) => {
+                if self
+                    .some_peek_token()?
+                    .kind
+                    == TokenKind::RParen
+                {
+                    self.consume()?;
+                    let args = self.parse_tuple(TokenKind::RParen)?;
+                    Expr::Call { ident, args }
+                } else {
+                    dbg!(self.peek_token());
+                    Expr::Ident(ident)
+                }
             }
-            _ => todo!(),
+            TokenKind::LParen => {
+                let lexp = self.parse_expr()?;
+                self.expect_token(TokenKind::RParen)?;
+                lexp
+            }
+            _ => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken,
+                    span: Some(token.span),
+                });
+            }
+        };
+
+        let t = self.some_peek_token()?;
+        match Op::from_kind(&t.kind) {
+            Op::CaoBinOp(_) => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                span: Some(t.span),
+            }),
+            Op::UnOp(op) => {
+                self.consume()?;
+                Ok(Expr::Unary {
+                    exp: Box::new(lexp),
+                    op,
+                })
+            }
+            Op::BinOp(op) => {
+                self.consume()?;
+                Ok(Expr::Binary {
+                    lexp: Box::new(lexp),
+                    rexp: Box::new(self.parse_expr()?),
+                    op,
+                })
+            }
+            Op::None => Ok(lexp),
         }
-        Ok(Expr::Lit(GeneralType::Int(4)))
     }
+
+    fn parse_bracket_param() {}
+}
+
+/*
+fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+    dbg!(self.peek_token());
+    let token = self.some_next_token()?;
+    let lexp = match token.kind {
+        TokenKind::LParen => self.parse_expr()?,
+        TokenKind::Int(n) => Expr::Lit(GeneralType::Int(n)),
+        TokenKind::Float(n) => Expr::Lit(GeneralType::Float(n)),
+        TokenKind::Bool(n) => Expr::Lit(GeneralType::Bool(n)),
+        TokenKind::Ident(ident) => {
+            println!("--------------is ident ---------------");
+            dbg!(self.peek_token());
+            if self
+                .some_peek_token()?
+                .kind
+                == TokenKind::LParen
+            {
+                self.consume()?;
+                let c = Expr::Call {
+                    ident,
+                    args: Some(self.parse_tuple(TokenKind::RParen)?),
+                };
+                println!("------------ post func -----------");
+                dbg!(self.peek_token());
+                c
+            } else {
+                Expr::Ident(ident)
+            }
+        }
+        _ => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                span: Some(token.span),
+            });
+        }
+    };
+    dbg!(self.peek_token());
+
+    let t = self.some_peek_token()?;
+    match Op::from_kind(&t.kind) {
+        Op::CaoBinOp(_) => Err(ParseError {
+            kind: ParseErrorKind::UnexpectedToken,
+            span: Some(token.span),
+        }),
+        Op::UnOp(op) => {
+            self.consume()?;
+            Ok(Expr::Unary {
+                exp: Box::new(lexp),
+                op,
+            })
+        }
+        Op::BinOp(op) => {
+            self.consume()?;
+            Ok(lexp.insert_left(self.parse_expr()?, op))
+        }
+        Op::None => {
+            if t.kind == TokenKind::RParen {
+                self.consume()?;
+            }
+            Ok(lexp)
+        }
+    }
+}
+*/

@@ -4,8 +4,9 @@ use std::str::CharIndices;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
-    Int(u64),
-    Float(f64),
+    Int(u32),
+    Float(f32),
+    Bool(bool),
     Keyword(Keyword),
     Type(Type),
     Ident(String),
@@ -50,11 +51,6 @@ pub enum TokenKind {
     RetType,
     Comma,
 }
-impl TokenKind {
-    pub fn is_binop(&self) -> bool {
-        return self == TokenKind::Add || self == TokenKind::Sub || self == TokenKind::Mul;
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Keyword {
@@ -79,10 +75,9 @@ pub struct Token {
 
 #[derive(Debug, Clone)]
 pub struct Span {
-    start: usize,
-    end: usize,
+    pub start: usize,
+    pub end: usize,
 }
-//  println!("\x1b[4:3m\x1b[58;2;255;0;0mmisspelt wrod\x1b[59m\x1bstuff");
 
 #[derive(Debug, Clone)]
 pub struct LexError {
@@ -176,9 +171,6 @@ impl<'src> Lexer<'src> {
     fn next_token(&mut self) -> Option<Result<Token, LexError>> {
         self.skip_whitespace();
         let (start, c) = self.bump()?;
-        let end = self.pos();
-        let span = Span { start, end };
-
         match c {
             c if c.is_alphabetic() => Some(self.lex_ident_or_keyword_or_type(start)),
             c if c.is_ascii_digit() => Some(self.lex_number(start)),
@@ -198,6 +190,8 @@ impl<'src> Lexer<'src> {
             "while" => TokenKind::Keyword(Keyword::While),
             "function" => TokenKind::Keyword(Keyword::Function),
             "u32" => TokenKind::Type(Type::U32),
+            "true" => TokenKind::Bool(true),
+            "false" => TokenKind::Bool(false),
             _ => TokenKind::Ident(String::from(text)),
         };
         Ok(Token {
@@ -306,10 +300,7 @@ impl<'src> Lexer<'src> {
                     TokenKind::Not
                 }
             }
-            '@' => {
-                self.consume();
-                TokenKind::At
-            }
+            '@' => TokenKind::At,
             '|' => {
                 if self.consume2('|') {
                     TokenKind::LogOr

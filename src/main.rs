@@ -1,5 +1,6 @@
 mod parser;
 mod tokenizer;
+use parser::Parser;
 use tokenizer::{LexError, Lexer};
 
 //use parser::{ParseError, Parser};
@@ -33,19 +34,12 @@ fn main() {
     let contents = get_contents(get_file_path());
     let tokens = Lexer::parse(&contents);
     display_tokens(tokens.clone());
-    /*
-    let prog = match Parser::new(tokens).parse() {
+    let prog = match Parser::parse(tokens) {
         Ok(prog) => prog,
-        Err(e) => match e {
-            ParseError::LexError(e) => {
-                e.debug(contents);
-                return;
-            }
-            _ => {
-                println!("ParseError");
-                return;
-            }
-        },
+        Err(e) => {
+            eprintln!("{:?}", e);
+            e.highlight_error(&contents);
+            return;
+        }
     };
-    */
 }
