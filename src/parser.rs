@@ -4,24 +4,29 @@ use crate::tokenizer::{Keyword, LexError, LexErrorKind, Lexer, Span, Token, Toke
 use std::collections::HashMap;
 use std::iter::Peekable;
 
+#[derive(Debug)]
 pub struct Function {
     ident: String,
     api: FunctionApi,
     block: Block,
 }
 
+#[derive(Debug)]
 pub struct FunctionParam {
     ident: String,
     _type: Type,
 }
 
+#[derive(Debug)]
 pub struct FunctionApi {
     params: Option<Vec<FunctionParam>>,
     _type: Option<Type>,
 }
 
+#[derive(Debug)]
 pub struct Block(Vec<Stmnt>);
 
+#[derive(Debug)]
 pub enum Stmnt {
     Let {
         ident: String,
@@ -52,6 +57,7 @@ pub enum Stmnt {
     },
 }
 
+#[derive(Debug)]
 pub enum Expr {
     Binary {
         lexp: Box<Expr>,
@@ -80,6 +86,7 @@ impl Expr {
     }
 }
 
+#[derive(Debug)]
 pub enum GeneralType {
     Int(u32),
     Float(f32),
@@ -153,7 +160,13 @@ impl Op {
     }
 }
 #[derive(Default)]
-pub struct FunctionMap(HashMap<String, Function>);
+pub struct FunctionMap(pub HashMap<String, Function>);
+
+impl FunctionMap {
+    pub fn get(&self, key: &str) -> Option<&Function> {
+        self.0.get(key)
+    }
+}
 
 pub struct Parser<'l> {
     tokens: Peekable<Lexer<'l>>,
@@ -169,7 +182,14 @@ pub struct ParseError {
 impl ParseError {
     pub fn highlight_error(&self, contents: &str) {
         if let Some(span) = &self.span {
-            println!("error: {}", &contents[span.start - 4..span.end + 4])
+            println!(
+                "error: {}",
+                &contents[span.start - 4
+                    ..contents
+                        .len()
+                        .min(span.end + 4)]
+            );
+            println!("           ^");
         }
     }
 }
@@ -367,7 +387,6 @@ impl<'l> Parser<'l> {
 
     fn parse_tuple(&mut self, terminator: TokenKind) -> Result<Option<Vec<Expr>>, ParseError> {
         let mut exprs = Vec::default();
-        dbg!(self.peek_token());
         loop {
             if self
                 .some_peek_token()?
@@ -377,19 +396,15 @@ impl<'l> Parser<'l> {
                 self.consume()?;
                 break;
             }
-            println!("-----------------pre parse-----------------");
             exprs.push(self.parse_expr()?);
             if self
                 .some_peek_token()?
                 .kind
                 == terminator
             {
-                println!("---------proper termination");
                 self.consume()?;
                 break;
             }
-            dbg!(self.peek_token());
-            println!("--------------improper termination");
             self.expect_token(TokenKind::Comma)?;
         }
 
@@ -403,13 +418,12 @@ impl<'l> Parser<'l> {
     fn parse_let(&mut self) -> Result<Stmnt, ParseError> {
         let ident = self.expect_ident()?;
         let _type = self.expect_type()?;
+        self.expect_token(TokenKind::Eq)?;
         let init = self.parse_expr()?;
         self.expect_token(TokenKind::Semi)?;
         Ok(Stmnt::Let { ident, _type, init })
     }
     fn parse_return(&mut self) -> Result<Stmnt, ParseError> {
-        println!("--------------return------------");
-        dbg!(self.peek_token());
         if self
             .some_peek_token()?
             .kind
@@ -458,6 +472,7 @@ impl<'l> Parser<'l> {
             TokenKind::LParen => {
                 self.consume()?;
                 let args = self.parse_tuple(TokenKind::RParen)?;
+                self.expect_token(TokenKind::Semi)?;
                 Ok(Stmnt::VoidFunction { ident, args })
             }
             TokenKind::Eq => {
@@ -469,23 +484,33 @@ impl<'l> Parser<'l> {
     }
     fn parse_cao(&mut self, ident: String) -> Result<Stmnt, ParseError> {
         let token = self.some_next_token()?;
-        if let Op::CaoBinOp(op) = Op::from_kind(&token.kind) {
-            Ok(Stmnt::Assign {
-                ident: ident.clone(),
-                init: self
-                    .parse_expr()?
-                    .insert_left(Expr::Ident(ident), op),
-            })
-        } else {
-            Err(ParseError {
+        match Op::from_kind(&token.kind) {
+            Op::CaoBinOp(op) => {
+                let exp = self.parse_expr()?;
+                self.expect_token(TokenKind::Semi)?;
+                Ok(Stmnt::Assign {
+                    ident: ident.clone(),
+                    init: exp.insert_left(Expr::Ident(ident), op),
+                })
+            }
+            Op::UnOp(op) => {
+                self.expect_token(TokenKind::Semi)?;
+                Ok(Stmnt::Assign {
+                    ident: ident.clone(),
+                    init: Expr::Unary {
+                        exp: Box::new(Expr::Ident(ident)),
+                        op,
+                    },
+                })
+            }
+            _ => Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken,
                 span: Some(token.span),
-            })
+            }),
         }
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        dbg!(self.peek_token());
         let token = self.some_next_token()?;
         let lexp = match token.kind {
             TokenKind::Int(n) => Expr::Lit(GeneralType::Int(n)),
@@ -495,13 +520,12 @@ impl<'l> Parser<'l> {
                 if self
                     .some_peek_token()?
                     .kind
-                    == TokenKind::RParen
+                    == TokenKind::LParen
                 {
                     self.consume()?;
                     let args = self.parse_tuple(TokenKind::RParen)?;
                     Expr::Call { ident, args }
                 } else {
-                    dbg!(self.peek_token());
                     Expr::Ident(ident)
                 }
             }
@@ -542,71 +566,4 @@ impl<'l> Parser<'l> {
             Op::None => Ok(lexp),
         }
     }
-
-    fn parse_bracket_param() {}
 }
-
-/*
-fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-    dbg!(self.peek_token());
-    let token = self.some_next_token()?;
-    let lexp = match token.kind {
-        TokenKind::LParen => self.parse_expr()?,
-        TokenKind::Int(n) => Expr::Lit(GeneralType::Int(n)),
-        TokenKind::Float(n) => Expr::Lit(GeneralType::Float(n)),
-        TokenKind::Bool(n) => Expr::Lit(GeneralType::Bool(n)),
-        TokenKind::Ident(ident) => {
-            println!("--------------is ident ---------------");
-            dbg!(self.peek_token());
-            if self
-                .some_peek_token()?
-                .kind
-                == TokenKind::LParen
-            {
-                self.consume()?;
-                let c = Expr::Call {
-                    ident,
-                    args: Some(self.parse_tuple(TokenKind::RParen)?),
-                };
-                println!("------------ post func -----------");
-                dbg!(self.peek_token());
-                c
-            } else {
-                Expr::Ident(ident)
-            }
-        }
-        _ => {
-            return Err(ParseError {
-                kind: ParseErrorKind::UnexpectedToken,
-                span: Some(token.span),
-            });
-        }
-    };
-    dbg!(self.peek_token());
-
-    let t = self.some_peek_token()?;
-    match Op::from_kind(&t.kind) {
-        Op::CaoBinOp(_) => Err(ParseError {
-            kind: ParseErrorKind::UnexpectedToken,
-            span: Some(token.span),
-        }),
-        Op::UnOp(op) => {
-            self.consume()?;
-            Ok(Expr::Unary {
-                exp: Box::new(lexp),
-                op,
-            })
-        }
-        Op::BinOp(op) => {
-            self.consume()?;
-            Ok(lexp.insert_left(self.parse_expr()?, op))
-        }
-        Op::None => {
-            if t.kind == TokenKind::RParen {
-                self.consume()?;
-            }
-            Ok(lexp)
-        }
-    }
-}
-*/

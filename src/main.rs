@@ -1,9 +1,15 @@
 mod parser;
 mod tokenizer;
-use parser::Parser;
-use tokenizer::{LexError, Lexer};
 
-//use parser::{ParseError, Parser};
+mod codegen;
+
+use codegen::gen_code;
+use parser::Parser;
+use tokenizer::Lexer;
+
+use std::io::Write;
+
+const ASM_PATH: &str = "main.s";
 
 fn get_file_path() -> String {
     let mut args = std::env::args();
@@ -24,6 +30,28 @@ fn get_contents(path: String) -> String {
     }
 }
 
+fn write_asm(contents: String) -> Option<()> {
+    let mut file = std::fs::File::create(ASM_PATH).ok()?;
+    file.write_all(contents.as_bytes())
+        .ok()
+}
+
+fn run_asm() {
+    let out = std::process::Command::new("make")
+        .arg("run")
+        .output()
+        .expect("Failed to run");
+    let res = String::from_utf8_lossy(&out.stdout);
+    for line in res.lines().skip(2) {
+        println!("{}", line);
+    }
+
+    let _ = std::process::Command::new("make")
+        .arg("clean")
+        .output()
+        .expect("Failed to clean");
+}
+
 fn display_tokens(tokens: Lexer) {
     for t in tokens {
         println!("{:?}", t);
@@ -42,4 +70,23 @@ fn main() {
             return;
         }
     };
+    /*
+        for (ident, func) in prog.0.clone() {
+            println!("{}", ident);
+            println!("{:#?}", func);
+        }
+    */
+
+    let code = match gen_code(prog) {
+        Ok(code) => code,
+        Err(_) => {
+            eprintln!("Codegen Error");
+            return;
+        }
+    };
+    if write_asm(code).is_none() {
+        eprintln!("failed to write to file");
+    }
+
+    run_asm();
 }

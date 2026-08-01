@@ -3,7 +3,7 @@ function fib(n@u32) ~> @u32{
         return n;
     }
     else {
-        return fib(n-1) + fib(n+1);
+        return fib(n-1) + fib(n-2);
     }
 }
 
@@ -15,8 +15,76 @@ function main(){
         res *= 2;
         power --;
     }
-    return x + res;
+    let z@u32 = 7 * res + 2;
+    print(x + res + z);
+    return;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def fib(n):
+    if n == 0 or n == 1:
+        return n
+    else:
+        return fib(n-1) + fib(n-2)
+
+
+x = fib(4)
+res = 1
+power = 10
+while power:
+    res *= 2
+    power -= 1
+
+z = 7 * power + 2
+print(z + x + power)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

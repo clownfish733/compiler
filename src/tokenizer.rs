@@ -294,7 +294,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             '!' => {
-                if self.consume2('!') {
+                if self.consume2('=') {
                     TokenKind::Ne
                 } else {
                     TokenKind::Not
