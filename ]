@@ -1,0 +1,272 @@
+use crate::{
+    parser::{BinOp, Block, Expr, Function, FunctionMap, FunctionParam, GeneralType, Stmnt},
+    tokenizer::Type,
+};
+use std::collections::HashMap;
+
+const PARAM_REGISTERS: &[Register] = &[
+    Register {
+        U64: "rdi",
+        U32: "edi",
+        U16: "di",
+    },
+    Register {
+        U64: "rsi",
+        U32: "esi",
+        U16: "si",
+    },
+    Register {
+        U64: "rdx",
+        U32: "edx",
+        U16: "dx",
+    },
+    Register {
+        U64: "rcx",
+        U32: "ecx",
+        U16: "sx",
+    },
+    Register {
+        U64: "r8",
+        U32: "r8d",
+        U16: "r8w",
+    },
+    Register {
+        U64: "r9",
+        U32: "r9d",
+        U16: "r9w",
+    },
+];
+
+#[allow(non_snake_case)]
+struct Register {
+    U64: &'static str,
+    U32: &'static str,
+    U16: &'static str,
+}
+
+pub enum CodeGenError {
+    NoMain,
+    VariableNotInstantiated { ident: String },
+    VariableInstantiatedTwice { ident: String },
+    CompilerError(String),
+}
+
+pub fn gen_code(map: FunctionMap) -> Result<String, CodeGenError> {
+    if !map
+        .0
+        .contains_key("main")
+    {
+        return Err(CodeGenError::NoMain);
+    }
+    let mut code = get_boiler_prefix();
+    code.extend(gen_built_in());
+    for (_ident, function) in map.0 {
+        code.extend(FunctionCodeGen::generate(function)?);
+    }
+
+    code.extend(gen_boiler_suffix());
+    Ok(code.join("\n"))
+}
+
+fn get_boiler_prefix() -> Vec<String> {
+    vec![
+        ".intel_syntax noprefix",
+        "\t.set SYS_WRITE, 1",
+        "\t.set SYS_EXIT, 60",
+        "\t.set STDOUT, 1",
+        "\t.set ZERO, 48",
+        "\t.section .text",
+        "\t.global _start",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
+fn gen_boiler_suffix() -> Vec<String> {
+    vec![
+        "_start:",
+        "\tpush rbp",
+        "\tmov rbp, rsp",
+        "\tcall main",
+        "\tmov rdi, 8",
+        "\tmov rax, SYS_EXIT",
+        "\tsyscall",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
+fn gen_built_in() -> Vec<String> {
+    vec![
+        "print:",
+        "\tpush rbp",
+        "\tmov rbp, rsp",
+        "\tsub rsp, 32",
+        "\tmov r9, -1",
+        "\tmov byte ptr [rbp - 1], 10",
+        "\tmov eax, edi",
+        ".Lprint_loop:",
+        "\txor edx, edx",
+        "\tmov ecx, 10",
+        "\tdiv ecx",
+        "\tdec r9",
+        "\tadd dl, ZERO",
+        "\tmov byte ptr [rbp + r9], dl",
+        "\ttest eax, eax",
+        "\tjnz .Lprint_loop",
+        "Lprint_end:",
+        "\tlea, [rbp + r9]",
+        "\tneg r9",
+        "\tmov rdx, r9",
+        "\tmov rdi, STDOUT",
+        "\tmov rax, SYS_WRITE",
+        "\tsyscall",
+        "\tleave",
+        "\tret",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
+struct SymbolTable {
+    symbols: HashMap<String, (usize, Type)>,
+    ofset: usize,
+    phantom_ofset: usize,
+}
+
+impl Default for SymbolTable {
+    fn default() -> Self {
+        Self {
+            symbols: HashMap::default(),
+            ofset: 4,
+            phantom_ofset: 0,
+        }
+    }
+}
+
+impl SymbolTable {
+    //return ofset for easier init
+    //TODO: assume that only type is u32 so delta ofset is always 4
+    fn let_var(&mut self, ident: &String, _type: &Type) -> Result<usize, CodeGenError> {
+        if self
+            .symbols
+            .insert(ident.clone(), (self.ofset, _type.clone()))
+            .is_some()
+        {
+            Err(CodeGenError::VariableInstantiatedTwice {
+                ident: ident.clone(),
+            })
+        } else {
+            let ofset = self.ofset;
+            self.ofset += 4;
+            Ok(ofset)
+        }
+    }
+
+    //return ofset and _type (so that appropriate ops can be used)
+    fn get_var(&self, ident: &String) -> Result<(usize, Type), CodeGenError> {
+        if let Some((ofset, _type)) = self
+            .symbols
+            .get(ident)
+        {
+            Ok((ofset.clone(), _type.clone()))
+        } else {
+            Err(CodeGenError::VariableNotInstantiated { ident })
+        }
+    }
+
+    //TODO: assume only u32 so delta ofset is always 4
+    fn get_phantom(&mut self, _type: Type) -> usize {
+        let phantom_ofset = self.phantom_ofset;
+        self.phantom_ofset += 4;
+        phantom_ofset + self.ofset
+    }
+
+    fn remove_phantom(&mut self, ofset: usize, _type: Type) -> Result<(), CodeGenError> {
+        self.phantom_ofset -= 4;
+        if self.phantom_ofset + self.ofset != ofset {
+            Err(CodeGenError::CompilerError(
+                "Tried to pop from none top of stack".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Default)]
+struct FunctionCodeGen {
+    lines: Vec<String>,
+    symbols: SymbolTable,
+}
+
+#[allow(unused_variables)]
+impl FunctionCodeGen {
+    fn push_line(&mut self, line: String) {
+        self.lines
+            .push(line);
+    }
+
+    fn generate(function: Function) -> Result<Vec<String>, CodeGenError> {
+        let mut generator = Self::default();
+        generator.label(function.ident)?;
+        generator.store_args(function.api.params)?;
+        generator.generate_block(function.block)?;
+        generator.allocate_stack_space()?;
+        Ok(generator.lines)
+    }
+
+    fn label(&mut self, ident: String) -> Result<(), CodeGenError> {
+        self.push_line(format!("{}:", ident));
+        Ok(())
+    }
+
+    fn store_args(&mut self, params: Option<Vec<FunctionParam>>) -> Result<(), CodeGenError> {
+        if let Some(params) = params {
+            for (FunctionParam { ident, _type }, reg) in params
+                .iter()
+                .zip(PARAM_REGISTERS)
+            {
+                match _type {
+                    Type::U32 => {
+                        let ofset = self
+                            .symbols
+                            .let_var(ident, _type)?;
+                        self.push_line(format!("mov dword ptr [rbp - {}], {}", ofset, reg.U32))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn generate_block(&mut self, block: Block) -> Result<(), CodeGenError> {
+        for stmnt in block {
+            match stmnt {
+                Stmnt::Let { ident, _type, init } => {
+                    let res_ofset = self.generate_expr(init)?;
+                    self.symbols.remove_phantom(res_ofset, _type)
+                    let ofset = self
+                        .symbols
+                        .let_var(&ident, &_type)?;
+                }
+                _ => todo!(),
+            }
+        }
+        Ok(())
+    }
+
+    fn allocate_stack_space(&mut self) -> Result<(), CodeGenError> {
+        todo!()
+    }
+
+    //leave result in eax register
+    fn generate_expr(&mut self, expr: Expr) -> Result<usize, CodeGenError> {
+        match expr{
+            Expr::Lit()
+        }
+    }
+}

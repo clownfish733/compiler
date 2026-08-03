@@ -42,9 +42,15 @@ fn run_asm() {
         .output()
         .expect("Failed to run");
     let res = String::from_utf8_lossy(&out.stdout);
-    for line in res.lines().skip(2) {
-        println!("{}", line);
-    }
+    let mut lines = res.lines();
+    lines.next();
+    lines.next();
+    println!(
+        "{}",
+        lines
+            .next()
+            .unwrap()
+    );
 
     let _ = std::process::Command::new("make")
         .arg("clean")
@@ -61,7 +67,7 @@ fn display_tokens(tokens: Lexer) {
 fn main() {
     let contents = get_contents(get_file_path());
     let tokens = Lexer::parse(&contents);
-    display_tokens(tokens.clone());
+    //display_tokens(tokens.clone());
     let prog = match Parser::parse(tokens) {
         Ok(prog) => prog,
         Err(e) => {
@@ -70,13 +76,7 @@ fn main() {
             return;
         }
     };
-    /*
-        for (ident, func) in prog.0.clone() {
-            println!("{}", ident);
-            println!("{:#?}", func);
-        }
-    */
-
+    //dbg!(&prog);
     let code = match gen_code(prog) {
         Ok(code) => code,
         Err(_) => {
@@ -84,9 +84,12 @@ fn main() {
             return;
         }
     };
-    if write_asm(code).is_none() {
+
+    if write_asm(code.clone()).is_none() {
         eprintln!("failed to write to file");
     }
 
     run_asm();
+
+    //println!("{}", code);
 }

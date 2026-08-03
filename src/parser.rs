@@ -6,27 +6,35 @@ use std::iter::Peekable;
 
 #[derive(Debug)]
 pub struct Function {
-    ident: String,
-    api: FunctionApi,
-    block: Block,
+    pub ident: String,
+    pub api: FunctionApi,
+    pub block: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionParam {
-    ident: String,
-    _type: Type,
+    pub ident: String,
+    pub _type: Type,
 }
 
 #[derive(Debug)]
 pub struct FunctionApi {
-    params: Option<Vec<FunctionParam>>,
-    _type: Option<Type>,
+    pub params: Option<Vec<FunctionParam>>,
+    pub _type: Option<Type>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block(Vec<Stmnt>);
 
-#[derive(Debug)]
+impl IntoIterator for Block {
+    type Item = Stmnt;
+    type IntoIter = std::vec::IntoIter<Stmnt>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Stmnt {
     Let {
         ident: String,
@@ -57,7 +65,7 @@ pub enum Stmnt {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Binary {
         lexp: Box<Expr>,
@@ -86,14 +94,14 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GeneralType {
     Int(u32),
     Float(f32),
     Bool(bool),
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Op {
     BinOp(BinOp),
     CaoBinOp(BinOp),
@@ -101,7 +109,7 @@ pub enum Op {
     None,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum BinOp {
     Add,
     Sub,
@@ -121,7 +129,7 @@ pub enum BinOp {
     LogAnd,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum UnOp {
     Inc,
     Dec,
@@ -159,7 +167,7 @@ impl Op {
         }
     }
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct FunctionMap(pub HashMap<String, Function>);
 
 impl FunctionMap {

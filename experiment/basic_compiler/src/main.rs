@@ -134,6 +134,7 @@ impl<'src> Iterator for Lexer<'src> {
     }
 }
 
+#[derive(Clone)]
 enum Expr {
     Binary {
         lexp: Box<Expr>,
@@ -204,6 +205,47 @@ fn shitty_eval(ast: Expr) -> u32 {
     }
 }
 
+#[derive(Default)]
+struct Evaluator {
+    stack: Vec<u32>,
+}
+
+impl Evaluator {
+    fn eval(ast: Expr) -> u32 {
+        let mut evaluator = Evaluator::default();
+        evaluator.eval_expr(ast);
+        evaluator
+            .stack
+            .pop()
+            .unwrap()
+    }
+
+    fn eval_expr(&mut self, expr: Expr) {
+        match expr {
+            Expr::Lit(n) => self.stack.push(n),
+            Expr::Binary { lexp, rexp, op } => {
+                self.eval_expr(*lexp);
+                self.eval_expr(*rexp);
+                let a = self
+                    .stack
+                    .pop()
+                    .unwrap();
+                let b = self
+                    .stack
+                    .pop()
+                    .unwrap();
+                self.stack
+                    .push(match op {
+                        Op::Add => a + b,
+                        Op::Sub => a - b,
+                        Op::Mul => a * b,
+                        Op::Div => a / b,
+                    })
+            }
+        }
+    }
+}
+
 fn get_file_path() -> Option<String> {
     let mut args = std::env::args();
     if let Some(_) = args.next()
@@ -251,5 +293,5 @@ fn main() {
             return;
         }
     };
-    println!("{}", shitty_eval(ast));
+    assert_eq!(shitty_eval(ast.clone()), Evaluator::eval(ast));
 }
