@@ -4,7 +4,7 @@
 - has no heap based datastructures
 
 ## To run:
-'''bash
+```bash
 cargo build --release
 build/release/compiler $filepath
-'''
+```
