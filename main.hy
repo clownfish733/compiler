@@ -15,5 +15,8 @@ function main(){
         res *= 2;
         power --;
     }
-    print(x + res);
+    let z@u32 = (10 + 4 * (fib(8 - 2) + 3));
+    print(x + res + z);
+    res = 3;
+    print(res);
 }

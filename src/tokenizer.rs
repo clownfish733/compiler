@@ -67,6 +67,11 @@ pub enum Type {
     U32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum DirectType {
+    U32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,

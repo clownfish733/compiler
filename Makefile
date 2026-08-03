@@ -11,4 +11,4 @@ run: prog
 .PHONY: all run
 
 clean:
-	rm main.o main.s
+	rm main.o

@@ -484,7 +484,9 @@ impl<'l> Parser<'l> {
                 Ok(Stmnt::VoidFunction { ident, args })
             }
             TokenKind::Eq => {
+                self.consume()?;
                 let init = self.parse_expr()?;
+                self.expect_token(TokenKind::Semi)?;
                 Ok(Stmnt::Assign { ident, init })
             }
             _ => self.parse_cao(ident),
